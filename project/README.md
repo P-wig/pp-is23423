@@ -211,7 +211,7 @@ Smalltalk client.
 Expected to deliver:
 
 * Your CI is up and running (although you do not need to have Smalltalk in the CI)
-* Your Smalltalk client is complete
+* Your Smalltalk client is complete ---DO THIS STILL!!!
 
 Do not include unnecessary binaries into your repository.
 
