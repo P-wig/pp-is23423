@@ -55,21 +55,21 @@ and you can easily replace any part of the system with a more robust
 implementation.
 
 ```
- ---------      ------------
-| client  |--->| graph db   |
- ---------      ------------
+ --------------------------                           -----------------
+| client (textbox: cypher) |--->(1) check cypher --->| graph db (neoj) |
+ --------------------------                           -----------------
    ^
-   |
+   | REST: /query/my_cypher
    v                                 
- ------------------      -------------------
-| db service       |--->| query transformer |
- ------------------      -------------------
+ ------------------      ---------------------------------------------------
+| db service       |--->| query transformer/transform cypher into sql query |
+ ------------------      ---------------------------------------------------
    ^
-   |
+   | send SQL to relational db
    v
- ----------
-| db      |
- ----------
+ ------------------------
+| db   Mysql or SQLite   |
+ ------------------------
 ```
 
 * client - client application that has API for sending
