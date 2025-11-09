@@ -31,6 +31,13 @@ For example:
 ```
 hash(sb43278) = 477
 ```
+My Project Requirements:
+```
+hash(is23423) = ascii('i') + ascii('s') + ascii('2') + ascii('3') + ascii('4') + ascii('2') + ascii('3')
+              = 105 + 115 + 50 + 51 + 52 + 50 + 51 = 474
+Go web framework: 474 % 4 = 2 → Echo framework
+Database: 474 % 2 = 0 → SQLite
+Table type: 474 % 2 = 0 → table that stores a list of columns
 
 In the following section, we will compute problem that you should
 solve by the following formula:
