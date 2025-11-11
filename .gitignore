@@ -20,3 +20,24 @@ __pycache__/
 venv/
 .env
 .vscode/
+
+# Go executables and build artifacts
+*.exe
+cypher-server
+cypher-server.exe
+go.sum
+
+# Rust executables and build artifacts
+target/
+Cargo.lock
+*.pdb
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# General executables
+*.out
+*.app
+*.dSYM/
