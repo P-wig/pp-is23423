@@ -37,7 +37,8 @@ func main() {
 	// Routes
 	e.POST("/query", handleQuery)
 	e.GET("/health", healthCheck)
-	e.GET("/data", showData) // New endpoint to see sample data
+	e.GET("/data", showData)
+	e.GET("/test-sql", testSQL) // New test endpoint
 
 	// Start server
 	e.Logger.Fatal(e.Start(":8080"))
@@ -52,11 +53,20 @@ func handleQuery(c echo.Context) error {
 		})
 	}
 
-	// For now, execute a sample SQL query
 	// TODO: Replace with Cypher -> SQL transformation
-	sampleSQL := "SELECT json_extract(properties, '$.name') as name, json_extract(properties, '$.age') as age FROM nodes WHERE label = 'Person'"
+	// For now, execute a sample SQL query based on common Cypher patterns
+	var sqlQuery string
+	if req.Query != "" {
+		// Simple example: return all people for any query
+		sqlQuery = `SELECT json_extract(properties, '$.name') as name, 
+                           json_extract(properties, '$.age') as age,
+                           json_extract(properties, '$.occupation') as occupation
+                    FROM nodes WHERE label = 'Person'`
+	} else {
+		sqlQuery = "SELECT 'No query provided' as message"
+	}
 
-	columns, rows, err := executeSQL(sampleSQL)
+	columns, rows, err := executeSQL(sqlQuery)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, QueryResponse{
 			Success: false,
@@ -77,9 +87,9 @@ func healthCheck(c echo.Context) error {
 	})
 }
 
-// New endpoint to view sample data
+// View all nodes
 func showData(c echo.Context) error {
-	columns, rows, err := executeSQL("SELECT * FROM nodes")
+	columns, rows, err := executeSQL("SELECT * FROM nodes LIMIT 10")
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": err.Error(),
@@ -89,5 +99,35 @@ func showData(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"columns": columns,
 		"rows":    rows,
+	})
+}
+
+// Test SQL queries directly
+func testSQL(c echo.Context) error {
+	// Test query to get people living in Austin
+	sql := `SELECT 
+                n1.id,
+                json_extract(n1.properties, '$.name') as person_name,
+                json_extract(n1.properties, '$.occupation') as occupation,
+                json_extract(n2.properties, '$.name') as city_name
+            FROM nodes n1
+            JOIN relationships r ON n1.id = r.from_id
+            JOIN nodes n2 ON r.to_id = n2.id
+            WHERE n1.label = 'Person' 
+              AND n2.label = 'City' 
+              AND r.type = 'LIVES_IN'
+              AND json_extract(n2.properties, '$.name') = 'Austin'`
+
+	columns, rows, err := executeSQL(sql)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"description": "People living in Austin",
+		"columns":     columns,
+		"rows":        rows,
 	})
 }
