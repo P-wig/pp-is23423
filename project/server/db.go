@@ -3,7 +3,9 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
+	"strconv"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -15,17 +17,39 @@ func initDatabase() error {
 	var err error
 	db, err = sql.Open("sqlite3", "./graph.db")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	// Test the connection
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	// Create schema for storing graph data
-	schema := `
+	if err := createTables(); err != nil {
+		return fmt.Errorf("failed to create tables: %w", err)
+	}
+
+	// Insert sample data matching the Neo4j structure
+	if err := insertNeo4jData(); err != nil {
+		return fmt.Errorf("failed to insert sample data: %w", err)
+	}
+
+	log.Println("Database initialized successfully")
+	return nil
+}
+
+func createTables() error {
+	// Create nodes table: stores graph nodes with labels and JSON properties
+	nodeTable := `
     CREATE TABLE IF NOT EXISTS nodes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         label TEXT NOT NULL,
         properties TEXT DEFAULT '{}'
-    );
+    )`
 
+	// Create relationships table: stores graph relationships with types and JSON properties
+	relTable := `
     CREATE TABLE IF NOT EXISTS relationships (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         from_id INTEGER NOT NULL,
@@ -34,15 +58,17 @@ func initDatabase() error {
         properties TEXT DEFAULT '{}',
         FOREIGN KEY(from_id) REFERENCES nodes(id),
         FOREIGN KEY(to_id) REFERENCES nodes(id)
-    );`
+    )`
 
-	_, err = db.Exec(schema)
-	if err != nil {
-		return err
+	if _, err := db.Exec(nodeTable); err != nil {
+		return fmt.Errorf("failed to create nodes table: %w", err)
 	}
 
-	// Insert sample data matching the Neo4j structure
-	return insertNeo4jData()
+	if _, err := db.Exec(relTable); err != nil {
+		return fmt.Errorf("failed to create relationships table: %w", err)
+	}
+
+	return nil
 }
 
 // Insert data matching the Neo4j structure
@@ -51,12 +77,20 @@ func insertNeo4jData() error {
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM nodes").Scan(&count)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to check existing data: %w", err)
 	}
 
 	if count > 0 {
+		log.Println("Sample data already exists, skipping insertion")
 		return nil // Data already exists
 	}
+
+	// Begin transaction for data consistency
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // Will be ignored if tx.Commit() succeeds
 
 	// Insert People
 	people := []map[string]interface{}{
@@ -69,10 +103,10 @@ func insertNeo4jData() error {
 
 	for _, person := range people {
 		props, _ := json.Marshal(person)
-		_, err := db.Exec("INSERT INTO nodes (label, properties) VALUES (?, ?)",
+		_, err := tx.Exec("INSERT INTO nodes (label, properties) VALUES (?, ?)",
 			"Person", string(props))
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to insert person: %w", err)
 		}
 	}
 
@@ -86,10 +120,10 @@ func insertNeo4jData() error {
 
 	for _, city := range cities {
 		props, _ := json.Marshal(city)
-		_, err := db.Exec("INSERT INTO nodes (label, properties) VALUES (?, ?)",
+		_, err := tx.Exec("INSERT INTO nodes (label, properties) VALUES (?, ?)",
 			"City", string(props))
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to insert city: %w", err)
 		}
 	}
 
@@ -104,10 +138,10 @@ func insertNeo4jData() error {
 
 	for _, movie := range movies {
 		props, _ := json.Marshal(movie)
-		_, err := db.Exec("INSERT INTO nodes (label, properties) VALUES (?, ?)",
+		_, err := tx.Exec("INSERT INTO nodes (label, properties) VALUES (?, ?)",
 			"Movie", string(props))
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to insert movie: %w", err)
 		}
 	}
 
@@ -138,62 +172,57 @@ func insertNeo4jData() error {
 
 	for _, rel := range relationships {
 		props, _ := json.Marshal(rel.properties)
-		_, err := db.Exec("INSERT INTO relationships (from_id, to_id, type, properties) VALUES (?, ?, ?, ?)",
+		_, err := tx.Exec("INSERT INTO relationships (from_id, to_id, type, properties) VALUES (?, ?, ?, ?)",
 			rel.fromID, rel.toID, rel.relType, string(props))
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to insert relationship: %w", err)
 		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	log.Println("Neo4j-matching data inserted successfully")
 	return nil
 }
 
-// Execute a simple SQL query and return results
+// Execute a SQL query and return results as columns and rows (for compatibility with main.go)
 func executeSQL(sqlQuery string) ([]string, [][]string, error) {
 	// Execute the SQL query against the database
-	// This returns a *sql.Rows object that contains the result set
 	rows, err := db.Query(sqlQuery)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("query execution failed: %w", err)
 	}
-	// Ensure rows are closed when function exits to free database resources
 	defer rows.Close()
 
 	// Get column names from the result set
-	// This tells us what fields/columns are in our query results
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to get columns: %w", err)
 	}
 
 	// Initialize slice to store all result rows
-	// Each row will be a slice of strings: [["Alice", "28"], ["Bob", "35"]]
 	var result [][]string
 
 	// Iterate through each row returned by the query
 	for rows.Next() {
-		// Create slices (interface is a slice that holds any type of value)
-		// to hold the raw column values for this row
-		// values: holds the actual data from database
-		// valuePtrs: holds pointers to the values (needed for Scan)
+		// Create slices to hold the raw column values for this row
 		values := make([]interface{}, len(columns))
 		valuePtrs := make([]interface{}, len(columns))
 
 		// Set up pointers - Scan() needs memory addresses to write to
 		for i := range values {
-			valuePtrs[i] = &values[i] // Point to each value slot
+			valuePtrs[i] = &values[i]
 		}
 
 		// Read the current row's data into our value pointers
-		// This populates the 'values' slice with actual database data
 		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Convert raw database values to strings for JSON response
-		// Database returns different types ([]byte, string, int64, etc.)
-		// Everything must be converted to strings for our API
 		row := make([]string, len(columns))
 		for i, val := range values {
 			if val == nil {
@@ -206,16 +235,20 @@ func executeSQL(sqlQuery string) ([]string, [][]string, error) {
 					// TEXT/BLOB columns come as byte slices
 					row[i] = string(v)
 				case string:
-					// String columns (rare in SQLite)
+					// String columns
 					row[i] = v
 				case int64:
-					// INTEGER columns - convert to string representation
-					// Note: string(rune(v)) might not work for large numbers
-					// Consider using strconv.FormatInt(v, 10) instead
-					row[i] = string(rune(v))
+					// INTEGER columns - use strconv for proper conversion
+					row[i] = strconv.FormatInt(v, 10)
+				case float64:
+					// REAL columns
+					row[i] = strconv.FormatFloat(v, 'f', -1, 64)
+				case bool:
+					// BOOLEAN columns
+					row[i] = strconv.FormatBool(v)
 				default:
-					// Fallback for unexpected types
-					row[i] = ""
+					// Fallback: convert to string representation
+					row[i] = fmt.Sprintf("%v", v)
 				}
 			}
 		}
@@ -223,8 +256,57 @@ func executeSQL(sqlQuery string) ([]string, [][]string, error) {
 		result = append(result, row)
 	}
 
-	// Return column names and all rows as string arrays
-	// columns: ["name", "age"]
-	// result: [["Alice", "28"], ["Bob", "35"]]
+	// Check for iteration errors
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
 	return columns, result, nil
+}
+
+// Alternative function that returns map results (from Rust Copilot version)
+// This can be useful for more complex JSON responses
+func executeSQLAsMap(sqlQuery string) ([]map[string]interface{}, error) {
+	rows, err := db.Query(sqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("query execution failed: %w", err)
+	}
+	defer rows.Close()
+
+	// Get column names
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	var results []map[string]interface{}
+
+	for rows.Next() {
+		// Create slice of interface{} for row values
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+
+		for i := range columns {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Convert to map
+		row := make(map[string]interface{})
+		for i, col := range columns {
+			row[col] = values[i]
+		}
+
+		results = append(results, row)
+	}
+
+	// Check for iteration errors
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return results, nil
 }

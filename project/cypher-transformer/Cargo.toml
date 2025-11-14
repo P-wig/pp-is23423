@@ -1,0 +1,12 @@
+[package]
+name = "cypher-transformer-wrapper"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "cypher_transformer"
+path = "src/main.rs"
+
+[dependencies]
+# This references YOUR fork as a Git dependency - no local paths!
+sqlparser = { git = "https://github.com/P-wig/datafusion-sqlparser-rs-is23423.git" }

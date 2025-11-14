@@ -2,8 +2,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -15,6 +19,8 @@ type QueryRequest struct {
 
 type QueryResponse struct {
 	Success bool       `json:"success"`
+	Cypher  string     `json:"cypher,omitempty"`
+	SQL     string     `json:"sql,omitempty"`
 	Columns []string   `json:"columns,omitempty"`
 	Rows    [][]string `json:"rows,omitempty"`
 	Error   string     `json:"error,omitempty"`
@@ -27,6 +33,11 @@ func main() {
 	}
 	defer db.Close()
 
+	// Ensure transformer binary is built
+	if err := buildTransformer(); err != nil {
+		log.Fatal("Failed to build transformer:", err)
+	}
+
 	e := echo.New()
 
 	// Middleware
@@ -35,12 +46,13 @@ func main() {
 	e.Use(middleware.CORS())
 
 	// Routes
-	e.POST("/query", handleQuery)
-	e.GET("/health", healthCheck)
-	e.GET("/data", showData)
-	e.GET("/test-sql", testSQL) // New test endpoint
+	e.POST("/query", handleQuery) // Original Cypher query endpoint
+	e.GET("/health", healthCheck) // Health check
+	e.GET("/data", showData)      // View sample data
+	e.GET("/test-sql", testSQL)   // Test SQL queries directly
 
 	// Start server
+	log.Println("Server starting on :8080")
 	e.Logger.Fatal(e.Start(":8080"))
 }
 
@@ -53,29 +65,38 @@ func handleQuery(c echo.Context) error {
 		})
 	}
 
-	// TODO: Replace with Cypher -> SQL transformation
-	// For now, execute a sample SQL query based on common Cypher patterns
-	var sqlQuery string
-	if req.Query != "" {
-		// Simple example: return all people for any query
-		sqlQuery = `SELECT json_extract(properties, '$.name') as name, 
-                           json_extract(properties, '$.age') as age,
-                           json_extract(properties, '$.occupation') as occupation
-                    FROM nodes WHERE label = 'Person'`
-	} else {
-		sqlQuery = "SELECT 'No query provided' as message"
+	if req.Query == "" {
+		return c.JSON(http.StatusBadRequest, QueryResponse{
+			Success: false,
+			Error:   "No Cypher query provided",
+		})
 	}
 
+	// Transform Cypher to SQL using your Rust transformer
+	sqlQuery, err := transformCypherToSQL(req.Query)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, QueryResponse{
+			Success: false,
+			Cypher:  req.Query,
+			Error:   "Failed to transform Cypher query: " + err.Error(),
+		})
+	}
+
+	// Execute the transformed SQL
 	columns, rows, err := executeSQL(sqlQuery)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, QueryResponse{
 			Success: false,
+			Cypher:  req.Query,
+			SQL:     sqlQuery,
 			Error:   "Database query failed: " + err.Error(),
 		})
 	}
 
 	return c.JSON(http.StatusOK, QueryResponse{
 		Success: true,
+		Cypher:  req.Query,
+		SQL:     sqlQuery,
 		Columns: columns,
 		Rows:    rows,
 	})
@@ -91,14 +112,16 @@ func healthCheck(c echo.Context) error {
 func showData(c echo.Context) error {
 	columns, rows, err := executeSQL("SELECT * FROM nodes LIMIT 10")
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": err.Error(),
+		return c.JSON(http.StatusInternalServerError, QueryResponse{
+			Success: false,
+			Error:   err.Error(),
 		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"columns": columns,
-		"rows":    rows,
+	return c.JSON(http.StatusOK, QueryResponse{
+		Success: true,
+		Columns: columns,
+		Rows:    rows,
 	})
 }
 
@@ -120,14 +143,55 @@ func testSQL(c echo.Context) error {
 
 	columns, rows, err := executeSQL(sql)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": err.Error(),
+		return c.JSON(http.StatusInternalServerError, QueryResponse{
+			Success: false,
+			Error:   err.Error(),
 		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"description": "People living in Austin",
-		"columns":     columns,
-		"rows":        rows,
+	return c.JSON(http.StatusOK, QueryResponse{
+		Success: true,
+		Columns: columns,
+		Rows:    rows,
+		SQL:     sql,
 	})
+}
+
+func buildTransformer() error {
+	// Check if binary already exists - add .exe extension for Windows
+	binaryPath := "../cypher-transformer/target/release/cypher_transformer.exe"
+	if _, err := os.Stat(binaryPath); err == nil {
+		log.Println("Transformer binary already exists")
+		return nil // Already built
+	}
+
+	log.Println("Building Rust transformer...")
+	cmd := exec.Command("cargo", "build", "--release")
+	cmd.Dir = "../cypher-transformer"
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to build transformer: %w", err)
+	}
+
+	log.Println("Transformer built successfully")
+	return nil
+}
+
+func transformCypherToSQL(cypherQuery string) (string, error) {
+	binaryPath := "../cypher-transformer/target/release/cypher_transformer.exe"
+
+	// Double-check binary exists
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("transformer binary not found at %s", binaryPath)
+	}
+
+	cmd := exec.Command(binaryPath, cypherQuery)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("transformation failed: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
 }
