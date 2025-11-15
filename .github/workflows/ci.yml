@@ -144,47 +144,60 @@ jobs:
         run: |
           # Start server
           cd server
-          go run main.go db.go &
+          go run main.go db.go > server.log 2>&1 &
           SERVER_PID=$!
           cd ..
-          
-          # Wait for server to start
-          sleep 5
-          
+
+          # Wait for health endpoint (up to 180 seconds)
+          for i in $(seq 1 180); do
+            if curl -s http://localhost:8080/health > /dev/null; then
+              echo "Server is up!"
+              break
+            fi
+            sleep 1
+          done
+
+          if ! curl -s http://localhost:8080/health > /dev/null; then
+            echo "Server did not start in time. Log output:"
+            cat server/server.log
+            kill $SERVER_PID
+            exit 1
+          fi
+
           # Test complete pipeline
           echo "Testing Person query..."
           RESPONSE=$(curl -s -X POST http://localhost:8080/query \
             -H "Content-Type: application/json" \
             -d '{"query": "MATCH (n:Person) RETURN n.name"}')
-          
+
           echo "Response: $RESPONSE"
-          
+
           # Check if response contains expected data
           echo $RESPONSE | grep -q "Alice Johnson"
           echo $RESPONSE | grep -q "success.*true"
-          
+
           echo "Testing City query..."
           curl -s -X POST http://localhost:8080/query \
             -H "Content-Type: application/json" \
             -d '{"query": "MATCH (n:City) RETURN n.name"}' | \
             grep -q "Austin"
-          
+
           echo "Testing relationship query..."
           curl -s -X POST http://localhost:8080/query \
             -H "Content-Type: application/json" \
             -d '{"query": "MATCH (p:Person)-[:LIVES_IN]->(c:City) RETURN p.name, c.name"}' | \
             grep -q "success.*true"
-          
+
           # Test error handling
           echo "Testing unsupported query..."
           curl -s -X POST http://localhost:8080/query \
             -H "Content-Type: application/json" \
             -d '{"query": "MATCH (n:Person) WHERE n.age > 30 RETURN n.name"}' | \
             grep -q "not yet supported"
-          
+
           # Stop server
           kill $SERVER_PID
-          
+
           echo "All integration tests passed!"
 
   # Code Quality Checks
