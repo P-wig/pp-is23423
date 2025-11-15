@@ -131,7 +131,7 @@ jobs:
           go-version: '1.21'
 
       - name: Download transformer binary
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: cypher-transformer-linux
           path: project/cypher-transformer/target/release/
