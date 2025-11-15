@@ -89,27 +89,41 @@ jobs:
       - name: Test Go server endpoints
         working-directory: project/server
         run: |
-          # Start server in background
-          ./server &
+          # Start server in background and log output
+          ./server > server.log 2>&1 &
           SERVER_PID=$!
-          
-          # Wait for server to start
-          sleep 30
-          
+
+          # Wait for server to be ready (try for up to 30 seconds)
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health > /dev/null; then
+              echo "Server is up!"
+              break
+            fi
+            sleep 1
+          done
+
+          # If not up after 30 seconds, print log and fail
+          if ! curl -s http://localhost:8080/health > /dev/null; then
+            echo "Server did not start in time. Log output:"
+            cat server.log
+            kill $SERVER_PID
+            exit 1
+          fi
+
           # Test health endpoint
           curl -f http://localhost:8080/health
-          
+
           # Test data endpoint
           curl -f http://localhost:8080/data
-          
+
           # Test SQL endpoint
           curl -f http://localhost:8080/test-sql
-          
+
           # Test Cypher query endpoint
           curl -f -X POST http://localhost:8080/query \
             -H "Content-Type: application/json" \
             -d '{"query": "MATCH (n:Person) RETURN n.name"}'
-          
+
           # Stop server
           kill $SERVER_PID
 
