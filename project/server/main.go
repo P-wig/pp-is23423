@@ -28,7 +28,7 @@ type QueryResponse struct {
 
 func main() {
 	// Initialize database
-	if err := initDatabase(); err != nil {
+	if err := initDatabase("graph.db"); err != nil {
 		log.Fatal("Failed to initialize database:", err)
 	}
 	defer db.Close()

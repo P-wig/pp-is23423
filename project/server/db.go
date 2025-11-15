@@ -13,9 +13,9 @@ import (
 var db *sql.DB
 
 // Initialize database and create tables
-func initDatabase() error {
+func initDatabase(path string) error {
 	var err error
-	db, err = sql.Open("sqlite3", "./graph.db")
+	db, err = sql.Open("sqlite3", path)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}

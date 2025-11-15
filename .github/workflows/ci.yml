@@ -86,36 +86,9 @@ jobs:
         working-directory: project/server
         run: go build -o server main.go db.go
 
-      - name: Test Go server endpoints
+      - name: Run Go unit tests
         working-directory: project/server
-        run: |
-          ./server > server.log 2>&1 &
-          SERVER_PID=$!
-
-          # Wait for health endpoint (up to 180 seconds)
-          for i in $(seq 1 180); do
-            if curl -s http://localhost:8080/health > /dev/null; then
-              echo "Server is up!"
-              break
-            fi
-            sleep 1
-          done
-
-          if ! curl -s http://localhost:8080/health > /dev/null; then
-            echo "Server did not start in time. Log output:"
-            cat server.log
-            kill $SERVER_PID
-            exit 1
-          fi
-
-          # Test health endpoint only
-          curl -f http://localhost:8080/health
-
-          # Optionally test /data endpoint
-          curl -f http://localhost:8080/data
-
-          # Stop server
-          kill $SERVER_PID
+        run: go test ./...
 
   # Integration Tests
   integration-tests:
