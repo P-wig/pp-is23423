@@ -93,8 +93,8 @@ jobs:
           ./server > server.log 2>&1 &
           SERVER_PID=$!
 
-          # Wait for server to be ready (try for up to 30 seconds)
-          for i in {1..30}; do
+          # Wait for health endpoint (up to 30 seconds)
+          for i in $(seq 1 30); do
             if curl -s http://localhost:8080/health > /dev/null; then
               echo "Server is up!"
               break
@@ -110,16 +110,11 @@ jobs:
             exit 1
           fi
 
-          # Test health endpoint
+          # Run endpoint tests
+          set -e
           curl -f http://localhost:8080/health
-
-          # Test data endpoint
           curl -f http://localhost:8080/data
-
-          # Test SQL endpoint
           curl -f http://localhost:8080/test-sql
-
-          # Test Cypher query endpoint
           curl -f -X POST http://localhost:8080/query \
             -H "Content-Type: application/json" \
             -d '{"query": "MATCH (n:Person) RETURN n.name"}'
