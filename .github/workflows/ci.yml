@@ -94,7 +94,7 @@ jobs:
           SERVER_PID=$!
           
           # Wait for server to start
-          sleep 15
+          sleep 30
           
           # Test health endpoint
           curl -f http://localhost:8080/health
