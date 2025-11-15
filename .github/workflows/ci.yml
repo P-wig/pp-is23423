@@ -1,4 +1,4 @@
-name: CI
+name: CI Pipeline
 
 on:
   push:
@@ -7,11 +7,244 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build:
+  # Test Rust Transformer
+  rust-transformer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.90.0
+          override: true
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            project/cypher-transformer/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build Rust transformer
+        working-directory: project/cypher-transformer
+        run: cargo build --release
+
+      - name: Test Rust transformer
+        working-directory: project/cypher-transformer
+        run: |
+          # Test basic functionality
+          ./target/release/cypher_transformer "MATCH (n:Person) RETURN n.name"
+          ./target/release/cypher_transformer "MATCH (n:City) RETURN n.name"
+
+      - name: Upload transformer binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: cypher-transformer-linux
+          path: project/cypher-transformer/target/release/cypher_transformer
+
+  # Test Go Server
+  go-server:
+    runs-on: ubuntu-latest
+    needs: rust-transformer
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Download transformer binary
+        uses: actions/download-artifact@v3
+        with:
+          name: cypher-transformer-linux
+          path: project/cypher-transformer/target/release/
+
+      - name: Make binary executable
+        run: chmod +x project/cypher-transformer/target/release/cypher_transformer
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+
+      - name: Install dependencies
+        working-directory: project/server
+        run: |
+          go mod download
+          go mod tidy
+
+      - name: Build Go server
+        working-directory: project/server
+        run: go build -o server main.go db.go
+
+      - name: Test Go server endpoints
+        working-directory: project/server
+        run: |
+          # Start server in background
+          ./server &
+          SERVER_PID=$!
+          
+          # Wait for server to start
+          sleep 5
+          
+          # Test health endpoint
+          curl -f http://localhost:8080/health
+          
+          # Test data endpoint
+          curl -f http://localhost:8080/data
+          
+          # Test SQL endpoint
+          curl -f http://localhost:8080/test-sql
+          
+          # Test Cypher query endpoint
+          curl -f -X POST http://localhost:8080/query \
+            -H "Content-Type: application/json" \
+            -d '{"query": "MATCH (n:Person) RETURN n.name"}'
+          
+          # Stop server
+          kill $SERVER_PID
+
+  # Integration Tests
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: [rust-transformer, go-server]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Download transformer binary
+        uses: actions/download-artifact@v3
+        with:
+          name: cypher-transformer-linux
+          path: project/cypher-transformer/target/release/
+
+      - name: Make binary executable
+        run: chmod +x project/cypher-transformer/target/release/cypher_transformer
+
+      - name: Run integration tests
+        working-directory: project
+        run: |
+          # Start server
+          cd server
+          go run main.go db.go &
+          SERVER_PID=$!
+          cd ..
+          
+          # Wait for server to start
+          sleep 5
+          
+          # Test complete pipeline
+          echo "Testing Person query..."
+          RESPONSE=$(curl -s -X POST http://localhost:8080/query \
+            -H "Content-Type: application/json" \
+            -d '{"query": "MATCH (n:Person) RETURN n.name"}')
+          
+          echo "Response: $RESPONSE"
+          
+          # Check if response contains expected data
+          echo $RESPONSE | grep -q "Alice Johnson"
+          echo $RESPONSE | grep -q "success.*true"
+          
+          echo "Testing City query..."
+          curl -s -X POST http://localhost:8080/query \
+            -H "Content-Type: application/json" \
+            -d '{"query": "MATCH (n:City) RETURN n.name"}' | \
+            grep -q "Austin"
+          
+          echo "Testing relationship query..."
+          curl -s -X POST http://localhost:8080/query \
+            -H "Content-Type: application/json" \
+            -d '{"query": "MATCH (p:Person)-[:LIVES_IN]->(c:City) RETURN p.name, c.name"}' | \
+            grep -q "success.*true"
+          
+          # Test error handling
+          echo "Testing unsupported query..."
+          curl -s -X POST http://localhost:8080/query \
+            -H "Content-Type: application/json" \
+            -d '{"query": "MATCH (n:Person) WHERE n.age > 30 RETURN n.name"}' | \
+            grep -q "not yet supported"
+          
+          # Stop server
+          kill $SERVER_PID
+          
+          echo "All integration tests passed!"
+
+  # Code Quality Checks
+  code-quality:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show directory structure
-        run: ls -R
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.90.0
+          override: true
+          components: rustfmt, clippy
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Rust format check
+        working-directory: project/cypher-transformer
+        run: cargo fmt --check
+
+      - name: Rust clippy
+        working-directory: project/cypher-transformer
+        run: cargo clippy -- -D warnings
+
+      - name: Go format check
+        working-directory: project/server
+        run: |
+          go fmt ./...
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Go code is not formatted. Run 'go fmt ./...'"
+            exit 1
+          fi
+
+      - name: Go vet
+        working-directory: project/server
+        run: go vet ./...
+
+  # Documentation Check
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check README links
+        run: |
+          # Check if README has basic sections
+          grep -q "Step-by-Step Testing Guide" project/README.md
+          grep -q "API Documentation" project/README.md
+          grep -q "Current Implementation Status" project/README.md
+          
+          echo "Documentation checks passed!"
+
+      - name: Validate file structure
+        run: |
+          # Check required files exist
+          test -f project/server/main.go
+          test -f project/server/db.go
+          test -f project/cypher-transformer/Cargo.toml
+          test -f project/cypher-transformer/src/main.rs
+          
+          echo "File structure validation passed!"
