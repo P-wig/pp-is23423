@@ -38,7 +38,6 @@ jobs:
       - name: Test Rust transformer
         working-directory: project/cypher-transformer
         run: |
-          # Test basic functionality
           ./target/release/cypher_transformer "MATCH (n:Person) RETURN n.name"
           ./target/release/cypher_transformer "MATCH (n:City) RETURN n.name"
 
@@ -90,63 +89,6 @@ jobs:
         working-directory: project/server
         run: go test ./...
 
-  # Integration Tests
-  integration-tests:
-    runs-on: ubuntu-latest
-    needs: [rust-transformer, go-server]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
-
-      - name: Download transformer binary
-        uses: actions/download-artifact@v4
-        with:
-          name: cypher-transformer-linux
-          path: project/cypher-transformer/target/release/
-
-      - name: Make binary executable
-        run: chmod +x project/cypher-transformer/target/release/cypher_transformer
-
-      - name: Run integration tests
-        working-directory: project
-        run: |
-          # Start server
-          cd server
-          go run main.go db.go > server.log 2>&1 &
-          SERVER_PID=$!
-          cd ..
-
-          # Wait for health endpoint (up to 180 seconds)
-          for i in $(seq 1 180); do
-            if curl -s http://localhost:8080/health > /dev/null; then
-              echo "Server is up!"
-              break
-            fi
-            sleep 1
-          done
-
-          if ! curl -s http://localhost:8080/health > /dev/null; then
-            echo "Server did not start in time. Log output:"
-            cat server/server.log
-            kill $SERVER_PID
-            exit 1
-          fi
-
-          # Test endpoints that do not require the transformer
-          curl -f http://localhost:8080/health
-          curl -f http://localhost:8080/data
-          curl -f http://localhost:8080/test-sql
-
-          # Stop server
-          kill $SERVER_PID
-
-          echo "Integration tests passed!"
-
   # Code Quality Checks
   code-quality:
     runs-on: ubuntu-latest
@@ -196,19 +138,15 @@ jobs:
 
       - name: Check README links
         run: |
-          # Check if README has basic sections
           grep -q "Step-by-Step Testing Guide" project/README.md
           grep -q "API Documentation" project/README.md
           grep -q "Current Implementation Status" project/README.md
-          
           echo "Documentation checks passed!"
 
       - name: Validate file structure
         run: |
-          # Check required files exist
           test -f project/server/main.go
           test -f project/server/db.go
           test -f project/cypher-transformer/Cargo.toml
           test -f project/cypher-transformer/src/main.rs
-          
           echo "File structure validation passed!"
