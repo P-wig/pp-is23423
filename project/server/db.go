@@ -264,7 +264,7 @@ func executeSQL(sqlQuery string) ([]string, [][]string, error) {
 	return columns, result, nil
 }
 
-// Alternative function that returns map results (from Rust Copilot version)
+// Alternative function that returns map results (from Rust version)
 // This can be useful for more complex JSON responses
 func executeSQLAsMap(sqlQuery string) ([]map[string]interface{}, error) {
 	rows, err := db.Query(sqlQuery)

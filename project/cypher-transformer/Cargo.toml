@@ -8,5 +8,5 @@ name = "cypher_transformer"
 path = "src/main.rs"
 
 [dependencies]
-# This references YOUR fork as a Git dependency - no local paths!
+# This references our fork as a Git dependency
 sqlparser = { git = "https://github.com/P-wig/datafusion-sqlparser-rs-is23423.git" }

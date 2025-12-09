@@ -158,7 +158,7 @@ func testSQL(c echo.Context) error {
 }
 
 func buildTransformer() error {
-	// Check if binary already exists - add .exe extension for Windows
+	// Check if binary already exists
 	binaryPath := "../cypher-transformer/target/release/cypher_transformer.exe"
 	if _, err := os.Stat(binaryPath); err == nil {
 		log.Println("Transformer binary already exists")
