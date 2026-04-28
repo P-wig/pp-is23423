@@ -16,6 +16,7 @@ def countSteps(heights):
             # finalize the current run
             if run_len >= 2:
                 # calculate the number of valid pairs in the run and add to total
+                # formula appears as L * (L - 1) / 2 where L is the length of the run
                 total += run_len * (run_len - 1) // 2
             run_len = 1
 
